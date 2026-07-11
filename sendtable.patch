@@ -1,0 +1,53 @@
+diff --git a/src/demo/message/mod.rs b/src/demo/message/mod.rs
+index 69e95b5..5e40d4c 100644
+--- a/src/demo/message/mod.rs
++++ b/src/demo/message/mod.rs
+@@ -34,6 +34,18 @@ pub mod tempentities;
+ pub mod usermessage;
+ pub mod voice;
+ 
++// Unlike a `ParseSendTable` embedded in the initial dem_datatables block (which
++// relies on prop_count/props being fully decoded to find its end), an inline
++// svc_SendTable message is self-delimiting: a 1-bit needs_decoder flag is
++// followed by a 16-bit bit-length of the remaining payload, so it can be
++// skipped without understanding the send-prop encoding at all.
++fn skip_send_table(stream: &mut Stream) -> Result<()> {
++    let _needs_decoder: bool = stream.read()?;
++    let length: u16 = stream.read()?;
++    stream.skip_bits(length as usize)?;
++    Ok(())
++}
++
+ #[cfg_attr(feature = "schema", derive(schemars::JsonSchema_repr))]
+ #[derive(BitRead, Debug, Clone, Copy, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
+ #[cfg_attr(feature = "write", derive(BitWrite))]
+@@ -48,6 +60,10 @@ pub enum MessageType {
+     SignOnState = 6,
+     Print = 7,
+     ServerInfo = 8,
++    // svc_SendTable(9): only seen sent inline (outside the initial dem_datatables
++    // block) for classes registered dynamically after signon; its contents are
++    // discarded since consumers of this crate never need them at that point.
++    SendTable = 9,
+     ClassInfo = 10,
+     SetPause = 11,
+     CreateStringTable = 12,
+@@ -164,6 +180,10 @@ impl<'a> Message<'a> {
+             MessageType::ServerInfo => {
+                 Message::ServerInfo(Box::new(ServerInfoMessage::parse(stream, state)?))
+             }
++            MessageType::SendTable => {
++                skip_send_table(stream)?;
++                Message::Empty
++            }
+             MessageType::ClassInfo => Message::ClassInfo(ClassInfoMessage::parse(stream, state)?),
+             MessageType::SetPause => Message::SetPause(SetPauseMessage::parse(stream, state)?),
+             MessageType::CreateStringTable => {
+@@ -219,6 +239,7 @@ impl<'a> Message<'a> {
+             MessageType::SignOnState => SignOnStateMessage::parse_skip(stream, state),
+             MessageType::Print => PrintMessage::parse_skip(stream, state),
+             MessageType::ServerInfo => ServerInfoMessage::parse_skip(stream, state),
++            MessageType::SendTable => skip_send_table(stream),
+             MessageType::ClassInfo => ClassInfoMessage::parse_skip(stream, state),
+             MessageType::SetPause => SetPauseMessage::parse_skip(stream, state),
+             MessageType::CreateStringTable => CreateStringTableMessage::parse_skip(stream, state),
