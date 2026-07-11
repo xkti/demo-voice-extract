@@ -2,3 +2,4 @@
 /target
 .rustc_info.json
 *.wav
+*.dem
