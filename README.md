@@ -10,7 +10,11 @@ Supports `vaudio_celt`, `vaudio_celt_high` and `steam` (Opus) voice codecs.
 
 Each player's data will be output into separate .wav files, denoted by their SteamID3 (`U_1_xxxxxxx.wav`.). The audio will be in realtime, same as playing the demo ingame.
 
-**I only tested this on Counter-Strike: Source demos, but it should work just fine with TF2 demos.**
+Tested demos:
+ - SourceTV demos for CS:S (NiDE: `vaudio_celt`, UNLOZE: `steam`)
+ - User demos for CS:S (NiDE: see above, JBlock: `vaudio_celt_high`, eGO: `steam`)
+ - SourceTV demos for TF2 (Uncletopia, castaway.tf: `steam`)
+ - **User demos for TF2 still not tested, but should work.**
 
 The following resources were used:
  - `vaudio_celt_client.so` and `libtier0_client.so` 64bit libraries from Valve's Counter-Strike: Global Offensive
