@@ -4,7 +4,7 @@
 
 ---
 
-**demo-voice-extract** -- A Counter-Strike: Source/Team Fortress 2 demo voice chat extractor for Linux. (demo version 3, network protocol 24)
+**demo-voice-extract** -- A Counter-Strike: Source/Team Fortress 2 demo voice chat extractor for Linux. **(demo version 3, network protocol 24)**
 
 Supports `vaudio_celt`, `vaudio_celt_high` and `steam` (Opus) voice codecs.
 
