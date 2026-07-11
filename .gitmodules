@@ -1,7 +1,7 @@
 [submodule "lib/parser"]
 	path = lib/parser
 	url = https://codeberg.org/demostf/parser.git
-        ignore = dirty
+	ignore = dirty
 [submodule "lib/opus-rs"]
 	path = lib/opus-rs
 	url = https://github.com/SpaceManiac/opus-rs
