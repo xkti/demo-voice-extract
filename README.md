@@ -42,7 +42,7 @@ cd lib/parser
 git apply ../../sendtable.patch
 # Build!
 cd ../..
-cargo build --release
+cargo build --release --target <target>
 ```
 
 **Usage**
@@ -50,7 +50,7 @@ cargo build --release
 ```bash
 target/release/demo-voice-extract <path_to_demo.dem>
 # OR
-cargo run --release -- <path_to_demo.dem>
+cargo run --release --target <target> -- <path_to_demo.dem>
 ```
 
 **Example**
