@@ -18,6 +18,7 @@ Tested demos:
 
 The following resources were used:
  - `vaudio_celt_client.so` and `libtier0_client.so` 64bit libraries from Valve's Counter-Strike: Global Offensive
+ - `vaudio_celt.dll` and `tier0.dll` 64bit libraries from Valve's Team Fortress 2
  - CELT's 0.11.1 headers from Xiph.org
  - [EloB's issue on demoinfocs-golang](https://github.com/markus-wa/demoinfocs-golang/issues/243)
  - [ericek111's CS:GO CELT decoder](https://gist.github.com/ericek111/abe5829f6e52e4b25b3b97a0efd0b22b)
@@ -27,19 +28,17 @@ The following resources were used:
  - [demostf/steam-audio-codec](https://codeberg.org/demostf/steam-audio-codec)
  - [Levi_OP's issue on steam-audio-codec](https://codeberg.org/demostf/steam-audio-codec/issues/1)
 
-
 ---
 
 **Building**
 
+Supported targets: `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, `x86_64-pc-windows-gnu`
+
 ```bash
 # Pull parser and opus-rs
 git submodule update --init --recursive
-# Fetch CELT v0.11.1
-cd lib/celt
-curl -sSL http://downloads.xiph.org/releases/celt/celt-0.11.1.tar.gz | tar xzvf -
-# Add stub for svc_SendTable event, parser never implemented and fails (JBlock demo failed)
-cd ../parser
+# Add stub for svc_SendTable event, parser never implemented it (JBlock demo fails without it)
+cd lib/parser
 git apply ../../sendtable.patch
 # Build!
 cd ../..
