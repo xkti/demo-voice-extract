@@ -12,8 +12,8 @@ Each player's data will be output into separate .wav files, denoted by their Ste
 
 Tested demos:
  - SourceTV demos for CS:S (NiDE: `vaudio_celt`, UNLOZE: `steam`)
- - User demos for CS:S (NiDE: see above, JBlock: `vaudio_celt_high`, eGO: `steam`)
  - SourceTV demos for TF2 (Uncletopia, castaway.tf: `steam`)
+ - User demos for CS:S (2020, 2026; NiDE: see above, JBlock: `vaudio_celt_high`, eGO: `steam`)
  - **User demos for TF2 still not tested, but should work.**
 
 The following resources were used:
@@ -35,9 +35,11 @@ The following resources were used:
 Supported targets: `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, `x86_64-pc-windows-gnu`
 
 ```bash
-# Pull parser and opus-rs
-git submodule update --init --recursive
-# Add stub for svc_SendTable event, parser never implemented it (JBlock demo fails without it)
+# Clone repo and pull parser and opus-rs submodules
+git clone --recursive https://github.com/xkti/demo-voice-extract
+cd demo-voice-extract
+# Add stub for svc_SendTable event to parser
+# Demos that receive custom sprays fail without it (possibly more)
 cd lib/parser
 git apply ../../sendtable.patch
 # Build!
@@ -51,6 +53,8 @@ cargo build --release --target <target>
 target/release/demo-voice-extract <path_to_demo.dem>
 # OR
 cargo run --release --target <target> -- <path_to_demo.dem>
+# OR drag and drop .dem onto demo-voice-extract.exe
+# Output will be same directory as .dem if you do this
 ```
 
 **Example**
