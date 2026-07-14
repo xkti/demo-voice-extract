@@ -13,7 +13,7 @@ Each player's data will be output into separate .wav files, denoted by their Ste
 Tested demos:
  - SourceTV demos for CS:S (NiDE: `vaudio_celt`, UNLOZE: `steam`)
  - SourceTV demos for TF2 (Uncletopia, castaway.tf: `steam`)
- - User demos for CS:S (2020, 2026; NiDE: see above, JBlock: `vaudio_celt_high`, eGO: `steam`)
+ - User demos for CS:S (2020, >2025; NiDE: see above, JBlock: `vaudio_celt_high`, eGO: `steam`)
  - **User demos for TF2 still not tested, but should work.**
 
 The following resources were used:
