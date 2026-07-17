@@ -1,4 +1,3 @@
-LABEL org.opencontainers.image.source=https://github.com/xkti/demo-voice-extract
 # build dve
 FROM rust:trixie AS builder
 
@@ -24,4 +23,6 @@ COPY --from=builder \
      .
 
 WORKDIR /data
+
+LABEL org.opencontainers.image.source=https://github.com/xkti/demo-voice-extract
 ENTRYPOINT ["/dve/demo-voice-extract"]
