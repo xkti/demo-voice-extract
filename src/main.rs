@@ -364,6 +364,16 @@ impl MessageHandler for VoiceExtractor {
     }
 }
 
+/// Below this, a `target_sample` overshoot is treated as tick-quantization noise rather than
+/// real silence and isn't padded. A single message can bundle up to two CELT frames (46ms of
+/// audio), but its attached tick only has ~15ms resolution, so a message ending a burst of
+/// continuous speech can legitimately land up to about one bundle's duration behind the
+/// tick-derived target even though nothing was actually silent. Padding for gaps that small
+/// splices audible, spurious silence into otherwise continuous speech (heard as a stutter);
+/// real gaps (the player releasing push-to-talk) run into the hundreds of ms to seconds and
+/// are unaffected by this threshold.
+const MIN_SILENCE_GAP: f64 = 0.1;
+
 /// Decode one player's buffered CELT voice messages into 16-bit mono PCM at
 /// `celt::OUTPUT_SAMPLE_RATE`.
 ///
@@ -376,6 +386,7 @@ fn decode_celt_track(
     total_duration: f64,
     pad: bool,
 ) -> Vec<i16> {
+    let min_gap_samples = (MIN_SILENCE_GAP * SAMPLE_RATE) as usize;
     let mut decoder: Option<CeltDecoder> = None;
     let mut samples: Vec<i16> = Vec::new();
 
@@ -383,7 +394,7 @@ fn decode_celt_track(
         if pad {
             let target_sample =
                 (u32::from(tick) as f64 * interval_per_tick * SAMPLE_RATE).round() as usize;
-            if target_sample > samples.len() {
+            if target_sample > samples.len() + min_gap_samples {
                 samples.resize(target_sample, 0);
             }
         }
