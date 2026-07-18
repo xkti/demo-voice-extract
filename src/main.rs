@@ -16,18 +16,53 @@ use celt::{CeltDecoder, CeltVariant};
 mod steam;
 use steam::{SteamVoiceData, SteamVoiceDecoder};
 
+/// Output mode, selected by an optional `--mix`/`--compact` flag (mutually exclusive).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// Original behaviour: one .wav per player, padded with silence so playback stays
+    /// aligned to the demo's real-time position.
+    Normal,
+    /// All players' voice streams overlaid (summed) into a single `downmix.wav`.
+    Mix,
+    /// One .wav per player like `Normal`, but without silence padding between (or before/
+    /// after) transmissions -- just the decoded audio, back to back.
+    Compact,
+}
+
 fn main() -> Result<(), MainError> {
     let args: Vec<_> = env::args().collect();
 
-    if args.len() != 2 {
-        eprintln!("Usage: {} <demo.dem>", args[0]);
-        std::process::exit(1);
+    let usage = format!("Usage: {} [--mix|--compact] <demo.dem>", args[0]);
+
+    let mut mode = Mode::Normal;
+    let mut demo_path: Option<&str> = None;
+
+    for arg in &args[1..] {
+        match arg.as_str() {
+            "--mix" | "--compact" if mode != Mode::Normal => {
+                eprintln!("Error: --mix and --compact are mutually exclusive");
+                eprintln!("{usage}");
+                std::process::exit(1);
+            }
+            "--mix" => mode = Mode::Mix,
+            "--compact" => mode = Mode::Compact,
+            _ if demo_path.is_some() => {
+                eprintln!("{usage}");
+                std::process::exit(1);
+            }
+            other => demo_path = Some(other),
+        }
     }
 
-    let data = fs::read(&args[1])?;
+    let Some(demo_path) = demo_path else {
+        eprintln!("{usage}");
+        std::process::exit(1);
+    };
+
+    let data = fs::read(demo_path)?;
 
     let demo = Demo::new(&data);
-    let parser = DemoParser::new_with_analyser(demo.get_stream(), VoiceExtractor::new());
+    let parser = DemoParser::new_with_analyser(demo.get_stream(), VoiceExtractor::new(mode));
 
     parser.parse()?;
 
@@ -54,10 +89,11 @@ struct VoiceExtractor {
     total_duration: f32,
     last_init: Option<VoiceInitMessage>,
     header: Option<Header>,
+    mode: Mode,
 }
 
 impl VoiceExtractor {
-    fn new() -> Self {
+    fn new(mode: Mode) -> Self {
         Self {
             buffers: HashMap::new(),
             steam_buffers: HashMap::new(),
@@ -68,6 +104,7 @@ impl VoiceExtractor {
             total_duration: 0.0,
             last_init: None,
             header: None,
+            mode,
         }
     }
 
@@ -241,122 +278,217 @@ impl MessageHandler for VoiceExtractor {
     fn into_output(mut self, _state: &ParserState) {
         self.print_summary();
 
-        let spec = hound::WavSpec {
-            channels: 1,
-            sample_rate: celt::OUTPUT_SAMPLE_RATE,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-
         let interval_per_tick = self.interval_per_tick as f64;
-        let total_samples = (self.total_duration as f64 * SAMPLE_RATE).round() as usize;
+        let total_duration = self.total_duration as f64;
+        // `Mix` still needs each player's stream aligned to real time (otherwise overlaying
+        // them is meaningless); only `Compact` skips the silence padding.
+        let pad = self.mode != Mode::Compact;
 
-        for (steam_id, messages) in self.buffers.drain() {
-            let mut decoder: Option<CeltDecoder> = None;
-            let mut samples: Vec<i16> = Vec::new();
-
-            for (tick, variant, raw) in messages {
-                // Pad with silence up to this transmission's real-time position
-                // so gaps between (and before) transmissions play back at the
-                // same pace as the original demo.
-                let target_sample =
-                    (u32::from(tick) as f64 * interval_per_tick * SAMPLE_RATE).round() as usize;
-                if target_sample > samples.len() {
-                    samples.resize(target_sample, 0);
-                }
-
-                let decoder = match &mut decoder {
-                    Some(decoder) if decoder.variant() == variant => decoder,
-                    _ => decoder.insert(CeltDecoder::new(variant)),
-                };
-                samples.extend_from_slice(&decoder.decode(&raw));
-            }
-
-            if total_samples > samples.len() {
-                samples.resize(total_samples, 0);
-            }
-
-            let filename = format!("{}.wav", steam3_filename(&steam_id));
-            let mut writer = hound::WavWriter::create(&filename, spec).unwrap();
-            for sample in samples {
-                writer.write_sample(sample).unwrap();
-            }
-            writer.finalize().unwrap();
-        }
-
-        for (steam_id, messages) in self.steam_buffers.drain() {
-            // Unlike CELT, "steam" voice data declares its own sample rate (typically 24000
-            // Hz, but the protocol allows several others), so it can't reuse
-            // `celt::OUTPUT_SAMPLE_RATE`. Peek the first `SampleRate` packet found among this
-            // speaker's messages instead of assuming a fixed rate.
-            let sample_rate = messages
-                .iter()
-                .find_map(|(_, raw)| SteamVoiceData::new(raw).ok()?.sample_rate())
-                .unwrap_or_else(|| {
-                    eprintln!(
-                        "warning: no SampleRate packet found for steam voice from {steam_id}, defaulting to 24000 Hz"
+        match self.mode {
+            Mode::Normal | Mode::Compact => {
+                for (steam_id, messages) in self.buffers.drain() {
+                    let samples =
+                        decode_celt_track(messages, interval_per_tick, total_duration, pad);
+                    write_wav(
+                        &format!("{}.wav", steam3_filename(&steam_id)),
+                        celt::OUTPUT_SAMPLE_RATE,
+                        &samples,
                     );
-                    24000
-                });
-            let sample_rate_f64 = sample_rate as f64;
-            let total_samples = (self.total_duration as f64 * sample_rate_f64).round() as usize;
-
-            let spec = hound::WavSpec {
-                channels: 1,
-                sample_rate: sample_rate as u32,
-                bits_per_sample: 16,
-                sample_format: hound::SampleFormat::Int,
-            };
-
-            // "steam" voice data carries its own internal silence run-lengths between Opus
-            // frames, so (unlike CELT) a persistent decoder naturally reconstructs continuous,
-            // real-time-accurate audio across consecutive messages from the same speaker on
-            // its own. But a single silence run is capped at a u16 sample count (a few seconds
-            // at most), so it can't describe a long stretch where this speaker sent no
-            // messages at all (e.g. not holding push-to-talk for a while). The same
-            // `target_sample` padding CELT uses covers that case: it only pads when we're
-            // behind where we should be, so it won't double count the gaps the decoder already
-            // filled in on its own.
-            let mut decoder = SteamVoiceDecoder::new();
-            let mut out_buffer = vec![0i16; sample_rate as usize * 10];
-            let mut samples: Vec<i16> = Vec::new();
-
-            for (tick, raw) in messages {
-                let target_sample =
-                    (u32::from(tick) as f64 * interval_per_tick * sample_rate_f64).round() as usize;
-                if target_sample > samples.len() {
-                    samples.resize(target_sample, 0);
                 }
 
-                let steam_data = match SteamVoiceData::new(&raw) {
-                    Ok(steam_data) => steam_data,
-                    Err(e) => {
-                        eprintln!(
-                            "warning: skipping malformed steam voice packet from {steam_id}: {e}"
-                        );
-                        continue;
+                for (steam_id, messages) in self.steam_buffers.drain() {
+                    let (sample_rate, samples) = decode_steam_track(
+                        &steam_id,
+                        messages,
+                        interval_per_tick,
+                        total_duration,
+                        pad,
+                    );
+                    write_wav(
+                        &format!("{}.wav", steam3_filename(&steam_id)),
+                        sample_rate,
+                        &samples,
+                    );
+                }
+            }
+            Mode::Mix => {
+                let mut tracks: Vec<(u32, Vec<i16>)> = Vec::new();
+
+                for (_steam_id, messages) in self.buffers.drain() {
+                    let samples =
+                        decode_celt_track(messages, interval_per_tick, total_duration, pad);
+                    tracks.push((celt::OUTPUT_SAMPLE_RATE, samples));
+                }
+
+                for (steam_id, messages) in self.steam_buffers.drain() {
+                    let (sample_rate, samples) = decode_steam_track(
+                        &steam_id,
+                        messages,
+                        interval_per_tick,
+                        total_duration,
+                        pad,
+                    );
+                    tracks.push((sample_rate, samples));
+                }
+
+                if tracks.is_empty() {
+                    eprintln!("warning: no voice data found, downmix.wav will be empty");
+                }
+
+                // A demo only ever uses one voice codec for every speaker (it's a
+                // server-wide setting), so every track here already shares a sample rate.
+                let target_rate = tracks
+                    .first()
+                    .map(|(rate, _)| *rate)
+                    .unwrap_or(celt::OUTPUT_SAMPLE_RATE);
+
+                let mut mix: Vec<i32> = Vec::new();
+                for (_rate, samples) in tracks {
+                    if mix.len() < samples.len() {
+                        mix.resize(samples.len(), 0);
                     }
-                };
-                match decoder.decode(steam_data, &mut out_buffer) {
-                    Ok(count) => samples.extend_from_slice(&out_buffer[..count]),
-                    Err(e) => eprintln!(
-                        "warning: skipping steam voice packet from {steam_id} that failed to decode: {e}"
-                    ),
+                    for (m, s) in mix.iter_mut().zip(samples.iter()) {
+                        *m += *s as i32;
+                    }
                 }
-            }
 
-            if total_samples > samples.len() {
-                samples.resize(total_samples, 0);
+                // Overlaying several speakers can exceed i16 range; clamp rather than
+                // rescale so a single quiet demo doesn't get its overall volume changed.
+                let samples: Vec<i16> = mix
+                    .into_iter()
+                    .map(|s| s.clamp(i16::MIN as i32, i16::MAX as i32) as i16)
+                    .collect();
+                write_wav("downmix.wav", target_rate, &samples);
             }
-
-            let filename = format!("{}.wav", steam3_filename(&steam_id));
-            let mut writer = hound::WavWriter::create(&filename, spec).unwrap();
-            for sample in samples {
-                writer.write_sample(sample).unwrap();
-            }
-            writer.finalize().unwrap();
         }
     }
+}
+
+/// Decode one player's buffered CELT voice messages into 16-bit mono PCM at
+/// `celt::OUTPUT_SAMPLE_RATE`.
+///
+/// When `pad` is set, silence is inserted so each transmission lands at its real-time
+/// position (matching demo playback) and the track is padded out to the demo's total
+/// duration. When unset, decoded audio is simply concatenated back to back.
+fn decode_celt_track(
+    messages: Vec<(DemoTick, CeltVariant, Vec<u8>)>,
+    interval_per_tick: f64,
+    total_duration: f64,
+    pad: bool,
+) -> Vec<i16> {
+    let mut decoder: Option<CeltDecoder> = None;
+    let mut samples: Vec<i16> = Vec::new();
+
+    for (tick, variant, raw) in messages {
+        if pad {
+            let target_sample =
+                (u32::from(tick) as f64 * interval_per_tick * SAMPLE_RATE).round() as usize;
+            if target_sample > samples.len() {
+                samples.resize(target_sample, 0);
+            }
+        }
+
+        let decoder = match &mut decoder {
+            Some(decoder) if decoder.variant() == variant => decoder,
+            _ => decoder.insert(CeltDecoder::new(variant)),
+        };
+        samples.extend_from_slice(&decoder.decode(&raw));
+    }
+
+    if pad {
+        let total_samples = (total_duration * SAMPLE_RATE).round() as usize;
+        if total_samples > samples.len() {
+            samples.resize(total_samples, 0);
+        }
+    }
+
+    samples
+}
+
+/// Decode one player's buffered "steam" voice messages into 16-bit mono PCM, returning the
+/// sample rate declared by the stream itself along with the samples.
+///
+/// See `decode_celt_track` for what `pad` controls.
+fn decode_steam_track(
+    steam_id: &str,
+    messages: Vec<(DemoTick, Vec<u8>)>,
+    interval_per_tick: f64,
+    total_duration: f64,
+    pad: bool,
+) -> (u32, Vec<i16>) {
+    // Unlike CELT, "steam" voice data declares its own sample rate (typically 24000 Hz, but
+    // the protocol allows several others), so it can't reuse `celt::OUTPUT_SAMPLE_RATE`. Peek
+    // the first `SampleRate` packet found among this speaker's messages instead of assuming a
+    // fixed rate.
+    let sample_rate = messages
+        .iter()
+        .find_map(|(_, raw)| SteamVoiceData::new(raw).ok()?.sample_rate())
+        .unwrap_or_else(|| {
+            eprintln!(
+                "warning: no SampleRate packet found for steam voice from {steam_id}, defaulting to 24000 Hz"
+            );
+            24000
+        });
+    let sample_rate_f64 = sample_rate as f64;
+
+    // "steam" voice data carries its own internal silence run-lengths between Opus frames, so
+    // (unlike CELT) a persistent decoder naturally reconstructs continuous, real-time-accurate
+    // audio across consecutive messages from the same speaker on its own. But a single silence
+    // run is capped at a u16 sample count (a few seconds at most), so it can't describe a long
+    // stretch where this speaker sent no messages at all (e.g. not holding push-to-talk for a
+    // while). The same `target_sample` padding CELT uses covers that case when `pad` is set: it
+    // only pads when we're behind where we should be, so it won't double count the gaps the
+    // decoder already filled in on its own.
+    let mut decoder = SteamVoiceDecoder::new();
+    let mut out_buffer = vec![0i16; sample_rate as usize * 10];
+    let mut samples: Vec<i16> = Vec::new();
+
+    for (tick, raw) in messages {
+        if pad {
+            let target_sample =
+                (u32::from(tick) as f64 * interval_per_tick * sample_rate_f64).round() as usize;
+            if target_sample > samples.len() {
+                samples.resize(target_sample, 0);
+            }
+        }
+
+        let steam_data = match SteamVoiceData::new(&raw) {
+            Ok(steam_data) => steam_data,
+            Err(e) => {
+                eprintln!("warning: skipping malformed steam voice packet from {steam_id}: {e}");
+                continue;
+            }
+        };
+        match decoder.decode(steam_data, &mut out_buffer) {
+            Ok(count) => samples.extend_from_slice(&out_buffer[..count]),
+            Err(e) => eprintln!(
+                "warning: skipping steam voice packet from {steam_id} that failed to decode: {e}"
+            ),
+        }
+    }
+
+    if pad {
+        let total_samples = (total_duration * sample_rate_f64).round() as usize;
+        if total_samples > samples.len() {
+            samples.resize(total_samples, 0);
+        }
+    }
+
+    (sample_rate as u32, samples)
+}
+
+fn write_wav(filename: &str, sample_rate: u32, samples: &[i16]) {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(filename, spec).unwrap();
+    for &sample in samples {
+        writer.write_sample(sample).unwrap();
+    }
+    writer.finalize().unwrap();
 }
 
 /// Turn a SteamID3 (e.g. `[U:1:19506566]`) into a string safe to use as a filename,

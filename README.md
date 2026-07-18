@@ -8,7 +8,7 @@
 
 Supports `vaudio_celt`, `vaudio_celt_high` and `steam` (Opus) voice codecs.
 
-Each player's data will be output into separate .wav files, denoted by their SteamID3 (`U_1_xxxxxxx.wav`.). The audio will be in realtime, same as playing the demo ingame.
+Each player's data will be output into separate .wav files, denoted by their SteamID3 (`U_1_xxxxxxx.wav`.). See usage for more info.
 
 Tested demos:
  - SourceTV demos for CS:S (NiDE: `vaudio_celt`, UNLOZE: `steam`)
@@ -50,14 +50,21 @@ cargo build --release --target <target>
 **Usage**
 
 ```bash
-target/release/demo-voice-extract <path_to_demo.dem>
+target/release/demo-voice-extract [--mix|--compact] <path_to_demo.dem>
 # OR
-cargo run --release --target <target> -- <path_to_demo.dem>
+cargo run --release --target <target> -- [--mix|--compact] <path_to_demo.dem>
 # OR drag and drop .dem onto demo-voice-extract.exe
 # Output will be same directory as .dem if you do this
 # OR docker/podman, assumes current directory has your demo
-docker run --rm -v .:/data ghcr.io/xkti/demo-voice-extract:latest <demo.dem>
+docker run --rm -v .:/data ghcr.io/xkti/demo-voice-extract:latest [--mix|--compact] <demo.dem>
 ```
+
+By default, each player is extracted to its own .wav file, with silence added between transmissions, making the playback the same as viewing the demo ingame,
+
+You can use two different options to change this:
+
+- `--mix` will combine every player into `downmix.wav`. Good for listening to everyone at once,
+- `--compact` will extract every player but NOT add silence inbetween. Good for getting clips.
 
 **Example**
 
