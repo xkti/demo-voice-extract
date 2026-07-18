@@ -56,7 +56,7 @@ cargo run --release --target <target> -- <path_to_demo.dem>
 # OR drag and drop .dem onto demo-voice-extract.exe
 # Output will be same directory as .dem if you do this
 # OR docker/podman, assumes current directory has your demo
-docker run --rm -v .:/data ghcr.io/xkti/demo-voice-extract:latest
+docker run --rm -v .:/data ghcr.io/xkti/demo-voice-extract:latest <demo.dem>
 ```
 
 **Example**
