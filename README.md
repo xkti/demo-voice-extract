@@ -59,11 +59,13 @@ cargo run --release --target <target> -- [--mix|--compact] <path_to_demo.dem>
 docker run --rm -v .:/data ghcr.io/xkti/demo-voice-extract:latest [--mix|--compact] <demo.dem>
 ```
 
-By default, each player is extracted to its own .wav file, with silence added between transmissions, making the playback the same as viewing the demo ingame,
+By default, each player is extracted to its own .wav file, with silence added between transmissions, making the playback the same as viewing the demo ingame.
+
+*There can be some stuttering this mode (and `--mix`) in some CELT demos, so if you need the cleanest audio, use `--compact`.*
 
 You can use two different options to change this:
 
-- `--mix` will combine every player into `downmix.wav`. Good for listening to everyone at once,
+- `--mix` will combine every player into `downmix.wav`. Good for listening to everyone at once.
 - `--compact` will extract every player but NOT add silence inbetween. Good for getting clips.
 
 **Example**
