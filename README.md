@@ -61,7 +61,7 @@ docker run --rm -v .:/data ghcr.io/xkti/demo-voice-extract:latest [--mix|--compa
 
 By default, each player is extracted to its own .wav file, with silence added between transmissions, making the playback the same as viewing the demo ingame.
 
-*There can be some stuttering this mode (and `--mix`) in some CELT demos, so if you need the cleanest audio, use `--compact`.*
+*There can be some stuttering in this mode (and `--mix`) on some CELT demos, so if you need the cleanest audio, use `--compact`.*
 
 You can use two different options to change this:
 
